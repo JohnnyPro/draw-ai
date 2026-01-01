@@ -40,7 +40,7 @@ OUTPUT_DIRECTORY = "./outputs"
 DEBUG_MODE = True
 
 # Drawing backend selection: "svg" or "turtle"
-DRAWING_BACKEND = "svg"
+DRAWING_BACKEND = "turtle"
 
 # ============================================================================
 # Enums and Data Classes
@@ -234,28 +234,38 @@ class DrawingController:
         system_prompt = """You are an AI assistant that creates structured drawing plans.
 You MUST respond with ONLY valid JSON, no other text.
 
+IMPORTANT RULES:
+1. MINIMIZE the number of objects. Only include objects the user EXPLICITLY asked for.
+2. If the user asks for "a cat", create ONE object called "cat" - do NOT split into separate objects for eyes, ears, body, etc.
+3. Prefer SINGLE OBJECT drawings. Only add multiple objects if the user explicitly mentions them (e.g., "a cat and a dog").
+4. Each object MUST have explicit bounding_box coordinates in pixels.
+
 Create a drawing plan with the following structure:
 {
     "canvas": {
-        "width": <number>,
-        "height": <number>,
-        "background": "<color (use valid SVG/CSS color names with no spaces, e.g., 'skyblue' instead of 'sky blue', or Hex codes like '#87CEEB')>"
+        "width": <number, typically 800>,
+        "height": <number, typically 800>,
+        "background": "<color (use valid SVG/CSS color names with no spaces, e.g., 'skyblue' or Hex codes like '#87CEEB')>"
     },
     "objects": [
         {
             "id": "<unique_id>",
             "type": "<object_type>",
-            "description": "<brief description>",
-            "approx_position": "<position like 'center', 'top-left', etc>",
-            "size": "<small/medium/large>"
+            "description": "<detailed description including all features like eyes, ears, etc.>",
+            "bounding_box": {
+                "x": <left edge x coordinate in pixels>,
+                "y": <top edge y coordinate in pixels>,
+                "width": <width in pixels>,
+                "height": <height in pixels>
+            }
         }
     ],
-    "composition": "<how objects relate to each other>",
+    "composition": "<how objects relate to each other, or 'single object' if only one>",
     "style": "<art style description>"
 }
 
-Keep the plan simple with 2-5 objects maximum.
-Use simple, descriptive IDs like "sun", "tree", "house".
+Remember: FEWER OBJECTS IS BETTER. Combine related parts into single objects.
+Use simple, descriptive IDs like "cat", "tree", "house".
 """
 
         user_msg = f"Create a drawing plan for: {user_prompt}"
@@ -320,12 +330,22 @@ Use simple, descriptive IDs like "sun", "tree", "house".
         """Initialize drawing state from plan."""
         object_states = {}
         for obj in plan.objects:
+            # Parse bounding box from plan if provided
+            bbox_data = obj.get("bounding_box", {})
+            bbox = BoundingBox(
+                x_min=bbox_data.get("x", 0),
+                y_min=bbox_data.get("y", 0),
+                x_max=bbox_data.get("x", 0) + bbox_data.get("width", 200),
+                y_max=bbox_data.get("y", 0) + bbox_data.get("height", 200),
+            )
+            
             object_states[obj["id"]] = ObjectState(
                 id=obj["id"],
                 obj_type=obj.get("type", "object"),
                 description=obj.get("description", ""),
                 approx_position=obj.get("approx_position", "center"),
                 size=obj.get("size", "medium"),
+                bounding_box=bbox,
             )
 
         self.state = DrawingState(plan=plan, object_states=object_states)
@@ -398,9 +418,21 @@ Use simple, descriptive IDs like "sun", "tree", "house".
 Canvas size: {self.state.plan.canvas_width}x{self.state.plan.canvas_height} pixels
 
 Stage instructions:
-- LAYOUT: Create rough positioning with simple placeholder shapes to establish object locations and approximate sizes
-- RENDER: Draw the complete object with all geometry, proportions, features, and details in one pass
+- LAYOUT: Draw a simple outline/placeholder within the bounding box to establish the object's position
+- RENDER: Draw the COMPLETE object with ALL features and details, staying within the bounding box coordinates
 """
+
+        # Get bounding box info
+        bbox = obj_state.bounding_box
+        bbox_info = f"""Bounding Box (MUST draw within these coordinates):
+- Left (x): {bbox.x_min}
+- Top (y): {bbox.y_min}
+- Right: {bbox.x_max}
+- Bottom: {bbox.y_max}
+- Width: {bbox.x_max - bbox.x_min}
+- Height: {bbox.y_max - bbox.y_min}
+- Center X: {(bbox.x_min + bbox.x_max) / 2}
+- Center Y: {(bbox.y_min + bbox.y_max) / 2}"""
 
         user_prompt = f"""Generate drawing code for object: {obj_id}
 Current stage: {stage.value}
@@ -408,15 +440,13 @@ Current stage: {stage.value}
 Object details:
 - Type: {obj_state.obj_type}
 - Description: {obj_state.description}
-- Position: {obj_state.approx_position}
-- Size: {obj_state.size}
+
+{bbox_info}
 
 Drawing composition: {self.state.plan.composition}
 Style: {self.state.plan.style}
 
-Current drawing state:
-{json.dumps(self.state.to_dict(), indent=2)}
-
+CRITICAL: All shapes MUST be positioned within the bounding box coordinates above.
 Generate drawing code ONLY for this object and stage. Output raw SVG-like elements only."""
 
         if DEBUG_MODE:

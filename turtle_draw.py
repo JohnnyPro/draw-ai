@@ -84,10 +84,11 @@ Example valid elements:
         )
         self.screen.bgcolor(self._parse_color(self.background) or "white")
         self.screen.title("LLM Drawing - Turtle Backend")
-        self.screen.tracer(0)  # Disable animation for speed
+        # Enable animation with a small delay (0 = fastest but still visible)
+        self.screen.tracer(1, 10)  # Update after every shape, 10ms delay
 
         self.turtle = t.Turtle()
-        self.turtle.speed(0)  # Fastest
+        self.turtle.speed(3)  # Medium speed for visibility
         self.turtle.hideturtle()
         self.turtle.penup()
 

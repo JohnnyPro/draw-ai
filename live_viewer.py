@@ -11,6 +11,14 @@ import socketserver
 import threading
 import webbrowser
 from functools import partial
+from typing import Optional
+
+
+class _QuietHandler(http.server.SimpleHTTPRequestHandler):
+    """A quiet request handler that doesn't log to stderr."""
+    def log_message(self, format: str, *args) -> None:
+        """Suppress log messages."""
+        pass
 
 
 class LiveViewer:
@@ -47,7 +55,7 @@ class LiveViewer:
             """)
 
         # Create a request handler that serves files from the specified directory
-        handler_with_dir = partial(http.server.SimpleHTTPRequestHandler, directory=self.directory)
+        handler_with_dir = partial(_QuietHandler, directory=self.directory)
         
         # Allow the port to be reused quickly
         socketserver.TCPServer.allow_reuse_address = True
@@ -59,13 +67,11 @@ class LiveViewer:
         self.server_thread.start()
 
         url = f"http://localhost:{self.port}"
-        print(f"  [Viewer] Live preview running at: {url}")
         webbrowser.open_new_tab(url)
 
     def stop(self) -> None:
         """Stop the HTTP server."""
         if self.httpd:
-            print("  [Viewer] Shutting down server...")
             self.httpd.shutdown()
             self.httpd.server_close()
             self.httpd = None
