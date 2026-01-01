@@ -52,8 +52,7 @@ class ObjectStatus(Enum):
 
 class DrawingStage(Enum):
     LAYOUT = "layout"
-    MAIN_SHAPES = "main_shapes"
-    DETAILS = "details"
+    RENDER = "render"  # Combined main shapes + details
 
 
 @dataclass
@@ -340,7 +339,7 @@ Use simple, descriptive IDs like "sun", "tree", "house".
         if self.state is None or self.renderer is None:
             raise RuntimeError("State not initialized")
 
-        stages = [DrawingStage.LAYOUT, DrawingStage.MAIN_SHAPES, DrawingStage.DETAILS]
+        stages = [DrawingStage.LAYOUT, DrawingStage.RENDER]
 
         for stage in stages:
             self.state.current_stage = stage
@@ -366,8 +365,8 @@ Use simple, descriptive IDs like "sun", "tree", "house".
                     obj_state.iteration_count += 1
                     self.state.total_iterations += 1
 
-                    # Mark as completed after details stage
-                    if stage == DrawingStage.DETAILS:
+                    # Mark as completed after render stage
+                    if stage == DrawingStage.RENDER:
                         obj_state.status = ObjectStatus.COMPLETED
 
                 # Update element count from renderer
@@ -391,9 +390,8 @@ Use simple, descriptive IDs like "sun", "tree", "house".
 Canvas size: {self.state.plan.canvas_width}x{self.state.plan.canvas_height} pixels
 
 Stage instructions:
-- LAYOUT: Create rough positioning with simple placeholder shapes
-- MAIN_SHAPES: Refine the primary geometry with correct proportions
-- DETAILS: Add finishing touches, features, and decorations
+- LAYOUT: Create rough positioning with simple placeholder shapes to establish object locations and approximate sizes
+- RENDER: Draw the complete object with all geometry, proportions, features, and details in one pass
 """
 
         user_prompt = f"""Generate drawing code for object: {obj_id}
