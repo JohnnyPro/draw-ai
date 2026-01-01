@@ -650,6 +650,11 @@ Example valid elements:
         if self.screen:
             self.screen.update()
             print("[Turtle] Drawing complete. Close the window to continue.")
+            try:
+                t.done()
+            except t.Terminator:
+                # This exception is raised when the window is closed, which is expected.
+                pass
 
     def cleanup(self) -> None:
         """Clean up turtle resources."""

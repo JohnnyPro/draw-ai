@@ -17,6 +17,7 @@ from datetime import datetime
 from typing import Optional
 from dataclasses import dataclass, field
 from enum import Enum
+import atexit
 
 from dotenv import load_dotenv
 import google.generativeai as genai
@@ -24,6 +25,8 @@ import google.generativeai as genai
 from base_draw import BaseDraw, DrawingConfig
 from svg import SVGDraw
 from turtle_draw import TurtleDraw
+from live_viewer import LiveViewer
+
 
 # ============================================================================
 # Configuration Parameters
@@ -219,11 +222,12 @@ def create_renderer(backend: str, config: DrawingConfig) -> BaseDraw:
 class DrawingController:
     """Controls the iterative drawing process using any BaseDraw backend."""
 
-    def __init__(self, llm_client: LLMClient, backend: str = DRAWING_BACKEND):
+    def __init__(self, llm_client: LLMClient, backend: str = DRAWING_BACKEND, live_preview_filepath: Optional[str] = None):
         self.llm_client = llm_client
         self.backend = backend
         self.state: Optional[DrawingState] = None
         self.renderer: Optional[BaseDraw] = None
+        self.live_preview_filepath = live_preview_filepath
 
     def create_plan(self, user_prompt: str) -> DrawingPlan:
         """Create a high-level drawing plan from user prompt."""
@@ -333,6 +337,10 @@ Use simple, descriptive IDs like "sun", "tree", "house".
             background=plan.background,
         )
         self.renderer = create_renderer(self.backend, config)
+        
+        # Create an empty drawing for the live viewer to start with
+        if self.live_preview_filepath and self.renderer:
+            self.renderer.save(self.live_preview_filepath)
 
     def run_drawing_loop(self) -> None:
         """Execute the main drawing loop."""
@@ -427,6 +435,10 @@ Generate drawing code ONLY for this object and stage. Output raw SVG-like elemen
 
                 # Update bounding box estimate based on position
                 self._update_bounding_box(obj_state)
+                
+                # Update live preview
+                if self.live_preview_filepath and self.renderer:
+                    self.renderer.save(self.live_preview_filepath)
 
                 return elements_added > 0
             else:
@@ -531,7 +543,23 @@ def main():
 
     # Initialize LLM client
     llm_client = LLMClient(api_key)
-    controller = DrawingController(llm_client, backend=DRAWING_BACKEND)
+    
+    # --- Live Viewer Setup ---
+    live_preview_filepath = None
+    if DRAWING_BACKEND == "svg":
+        LIVE_VIEWER_PORT = 8008
+        LIVE_SVG_FILENAME = "live_drawing.svg"
+        
+        # Ensure output directory exists
+        os.makedirs(OUTPUT_DIRECTORY, exist_ok=True)
+        
+        live_viewer = LiveViewer(LIVE_VIEWER_PORT, OUTPUT_DIRECTORY, LIVE_SVG_FILENAME)
+        live_viewer.start()
+        atexit.register(live_viewer.stop)
+        
+        live_preview_filepath = os.path.join(OUTPUT_DIRECTORY, LIVE_SVG_FILENAME)
+        
+    controller = DrawingController(llm_client, backend=DRAWING_BACKEND, live_preview_filepath=live_preview_filepath)
 
     drawing_count = 0
 
@@ -559,13 +587,13 @@ def main():
                 print(f"[Plan] Objects: {[obj['id'] for obj in plan.objects]}")
                 print(f"[Plan] Style: {plan.style}")
 
-            # Initialize state
+            # Initialize state and renderer
             controller.initialize_state(plan)
 
             # Run drawing loop
             controller.run_drawing_loop()
 
-            # Save output
+            # Save final output
             drawing_count += 1
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             
@@ -577,12 +605,13 @@ def main():
             print()
             print("=" * 60)
             print(f"✅ Drawing saved to: {filepath}")
-            print(f"   Total iterations: {controller.state.total_iterations}")
-            print(f"   Total elements: {controller.state.element_count}")
+            if controller.state:
+                print(f"   Total iterations: {controller.state.total_iterations}")
+                print(f"   Total elements: {controller.state.element_count}")
             print("=" * 60)
 
-            # Show turtle window if using turtle backend
-            if DRAWING_BACKEND == "turtle":
+            # For turtle, wait for the user to close the window
+            if DRAWING_BACKEND == "turtle" and controller.renderer:
                 controller.renderer.show()
 
             # Cleanup for next drawing
@@ -594,7 +623,7 @@ def main():
                 controller.cleanup()
             break
         except Exception as e:
-            print(f"\nError during drawing: {e}")
+            print(f"\nAn error occurred: {e}")
             if DEBUG_MODE:
                 import traceback
                 traceback.print_exc()
