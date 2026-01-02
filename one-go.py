@@ -4,14 +4,14 @@ LLM-Driven Programmatic Image Generation (One-Go Version)
 A simplified, non-iterative version of the drawing application that:
 - Accepts a natural language drawing prompt.
 - Uses the Gemini LLM to generate a complete drawing in a single call.
-- Reuses the existing drawing backends (SVG, Turtle).
+- Reuses the existing drawing backends (SVG, Turtle, Pillow).
 - Outputs a final image file.
+- Includes a live viewer for SVG and Pillow backends.
 """
 
 import os
-import json
-import time
 import re
+import atexit
 from datetime import datetime
 from typing import Optional
 
@@ -21,6 +21,8 @@ import google.generativeai as genai
 from base_draw import BaseDraw, DrawingConfig
 from svg import SVGDraw
 from turtle_draw import TurtleDraw
+from pillow_draw import PillowDraw
+from live_viewer import LiveViewer
 
 # ============================================================================
 # Configuration Parameters
@@ -33,8 +35,8 @@ DEFAULT_BACKGROUND = "white"
 OUTPUT_DIRECTORY = "./outputs"
 DEBUG_MODE = True
 
-# Drawing backend selection: "svg" or "turtle"
-DRAWING_BACKEND = "turtle"
+# Drawing backend selection: "svg", "turtle", or "pillow"
+DRAWING_BACKEND = "pillow"
 
 # ============================================================================
 # LLM Abstraction Layer (Copied from main.py)
@@ -47,15 +49,12 @@ class LLMClient:
     def __init__(self, api_key: str, min_interval: float = MIN_LLM_CALL_INTERVAL_SECONDS):
         self.min_interval = min_interval
         self.last_call_timestamp: Optional[float] = None
-
-        # Configure Gemini
         genai.configure(api_key=api_key)
         self.model = genai.GenerativeModel("gemini-2.5-flash")
 
     def _enforce_rate_limit(self) -> None:
-        """Sleep if needed to respect rate limits."""
         if self.last_call_timestamp is not None:
-            elapsed = time.time() - self.last_call_timestamp
+            elapsed = datetime.now().timestamp() - self.last_call_timestamp
             if elapsed < self.min_interval:
                 sleep_time = self.min_interval - elapsed
                 if DEBUG_MODE:
@@ -63,19 +62,18 @@ class LLMClient:
                 time.sleep(sleep_time)
 
     def call_llm(self, system_prompt: str, user_prompt: str) -> str:
-        """Make an LLM call with rate limiting."""
         self._enforce_rate_limit()
         full_prompt = f"{system_prompt}\n\n{user_prompt}"
         try:
             response = self.model.generate_content(full_prompt)
-            self.last_call_timestamp = time.time()
+            self.last_call_timestamp = datetime.now().timestamp()
             return response.text
         except Exception as e:
-            self.last_call_timestamp = time.time()
+            self.last_call_timestamp = datetime.now().timestamp()
             raise RuntimeError(f"LLM call failed: {e}")
 
 # ============================================================================
-# Drawing Backend Factory (Copied from main.py)
+# Drawing Backend Factory
 # ============================================================================
 
 
@@ -84,6 +82,7 @@ def create_renderer(backend: str, config: DrawingConfig) -> BaseDraw:
     backends = {
         "svg": SVGDraw,
         "turtle": TurtleDraw,
+        "pillow": PillowDraw,
     }
     if backend not in backends:
         raise ValueError(f"Unknown backend: {backend}. Available: {list(backends.keys())}")
@@ -99,36 +98,27 @@ def create_renderer(backend: str, config: DrawingConfig) -> BaseDraw:
 
 def _extract_code(response: str) -> str:
     """Extract drawing code from LLM response."""
-    code_match = re.search(r'```(?:svg|xml|html)?\s*([\s\S]*?)\s*```', response)
+    code_match = re.search(r'```(?:svg|xml|html|python)?\s*([\s\S]*?)\s*```', response)
     if code_match:
         return code_match.group(1)
-    # Look for SVG elements directly as a fallback
     if re.search(r'<(circle|rect|ellipse|line|polyline|polygon|path|text)\s', response, re.IGNORECASE):
         return response
     return response
 
 
-def generate_one_go(llm_client: LLMClient, user_prompt: str, backend: str) -> str:
+def generate_one_go(llm_client: LLMClient, user_prompt: str, backend: str, live_preview_filepath: Optional[str] = None) -> str:
     """
     Generates a complete drawing from a prompt in a single LLM call.
-
-    Args:
-        llm_client: The LLM client instance.
-        user_prompt: The user's drawing description.
-        backend: The drawing backend to use ("svg" or "turtle").
-
-    Returns:
-        The filepath of the saved drawing.
     """
     print(f"\n[One-Go] Using {backend.upper()} backend to draw: '{user_prompt}'")
 
     # 1. Create the drawing renderer
-    config = DrawingConfig(
-        width=DEFAULT_CANVAS_WIDTH,
-        height=DEFAULT_CANVAS_HEIGHT,
-        background=DEFAULT_BACKGROUND
-    )
+    config = DrawingConfig(width=DEFAULT_CANVAS_WIDTH, height=DEFAULT_CANVAS_HEIGHT, background=DEFAULT_BACKGROUND)
     renderer = create_renderer(backend, config)
+
+    # Create an initial empty file for the live viewer
+    if live_preview_filepath:
+        renderer.save(live_preview_filepath)
 
     # 2. Craft the "one-go" prompt
     backend_instructions = renderer.system_prompt_instructions
@@ -163,17 +153,20 @@ Generate the complete set of drawing elements for this entire scene now."""
     if DEBUG_MODE:
         print(f"  [LLM] Received {len(drawing_code)} characters of code.")
 
-    # 4. Add the code to the renderer
+    # 4. Add the code to the renderer and update live view
     elements_added = renderer.add_code("full_drawing", drawing_code)
     print(f"  [Renderer] Added {elements_added} element(s) to the canvas.")
+    if live_preview_filepath:
+        renderer.save(live_preview_filepath)
 
-    # 5. Save the output
-    drawing_count = len(os.listdir(OUTPUT_DIRECTORY)) + 1
+    # 5. Save the final output
+    file_count = len([name for name in os.listdir(OUTPUT_DIRECTORY) if name.startswith("one_go_")])
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    ext = "svg" if backend == "svg" else "eps"
-    filename = f"one_go_{drawing_count:03d}_{timestamp}.{ext}"
     
-    os.makedirs(OUTPUT_DIRECTORY, exist_ok=True)
+    ext_map = {"svg": "svg", "turtle": "eps", "pillow": "png"}
+    ext = ext_map.get(backend, "png")
+    filename = f"one_go_{file_count + 1:03d}_{timestamp}.{ext}"
+    
     filepath = os.path.join(OUTPUT_DIRECTORY, filename)
     renderer.save(filepath)
 
@@ -181,6 +174,8 @@ Generate the complete set of drawing elements for this entire scene now."""
     if backend == "turtle":
         print("\nClose the Turtle graphics window to continue.")
         renderer.show()
+    elif backend == "pillow":
+        renderer.show() # Open in default image viewer
     
     renderer.cleanup()
     
@@ -200,10 +195,26 @@ def main():
         return
 
     print("=" * 60)
-    print("🖼️  One-Go Drawing Application")
+    print(f"🖼️  One-Go Drawing Application ({DRAWING_BACKEND.upper()} backend)")
     print("=" * 60)
 
     llm_client = LLMClient(api_key)
+
+    # --- Live Viewer Setup ---
+    live_preview_filepath = None
+    if DRAWING_BACKEND in ["svg", "pillow"]:
+        ext_map = {"svg": "svg", "pillow": "png"}
+        ext = ext_map[DRAWING_BACKEND]
+        LIVE_FILENAME = f"live_drawing.{ext}"
+        LIVE_VIEWER_PORT = 8008
+        
+        os.makedirs(OUTPUT_DIRECTORY, exist_ok=True)
+        
+        live_viewer = LiveViewer(LIVE_VIEWER_PORT, OUTPUT_DIRECTORY, LIVE_FILENAME)
+        live_viewer.start()
+        atexit.register(live_viewer.stop)
+        
+        live_preview_filepath = os.path.join(OUTPUT_DIRECTORY, LIVE_FILENAME)
 
     while True:
         try:
@@ -211,7 +222,7 @@ def main():
             if not prompt.strip():
                 continue
 
-            filepath = generate_one_go(llm_client, prompt, DRAWING_BACKEND)
+            filepath = generate_one_go(llm_client, prompt, DRAWING_BACKEND, live_preview_filepath)
 
             print("\n" + "=" * 60)
             print(f"✅ Drawing saved to: {filepath}")
