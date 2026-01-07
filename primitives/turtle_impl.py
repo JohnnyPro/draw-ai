@@ -30,32 +30,33 @@ class TurtleDrawer:
             self.pen.fillcolor(fill_color)
         # No explicit 'unset' fill color, just control begin_fill/end_fill outside
 
-    def draw_line(self, x1: int, y1: int, x2: int, y2: int, color: str, width: int):
-        self._set_pen_style(color, width)
+    def draw_line(self, x1: int, y1: int, x2: int, y2: int, color: str = 'black', width: int = 1):
+        self._set_pen_style(color, int(width))
         self.pen.penup()
-        self.pen.goto(x1, y1)
+        self.pen.goto(int(x1), int(y1))
         self.pen.pendown()
-        self.pen.goto(x2, y2)
+        self.pen.goto(int(x2), int(y2))
         self.pen.penup()
 
-    def draw_arc(self, center_x: int, center_y: int, radius: int, start_angle: int, end_angle: int, color: str, width: int):
-        self._set_pen_style(color, width)
+    def draw_arc(self, center_x: int, center_y: int, radius: int, start_angle: int, end_angle: int, color: str = 'black', width: int = 1):
+        self._set_pen_style(color, int(width))
         self.pen.penup()
 
         # Move to the starting point of the arc on the circumference
-        self.pen.goto(center_x, center_y)
-        self.pen.setheading(start_angle) # Face the start angle direction
-        self.pen.forward(radius) # Move to circumference
+        self.pen.goto(int(center_x), int(center_y))
+        self.pen.setheading(int(start_angle)) # Face the start angle direction
+        self.pen.forward(int(radius)) # Move to circumference
         # Adjust heading to be tangent for drawing counter-clockwise with positive radius
-        self.pen.setheading(start_angle + 90)
+        self.pen.setheading(int(start_angle) + 90)
 
         self.pen.pendown()
-        extent = end_angle - start_angle
-        self.pen.circle(radius, extent=extent)
+        extent = int(end_angle) - int(start_angle)
+        self.pen.circle(int(radius), extent=extent)
         self.pen.penup()
 
 
-    def draw_circle(self, center_x: int, center_y: int, radius: int, fill_color: typing.Optional[str], stroke_color: typing.Optional[str], stroke_width: int):
+    def draw_circle(self, center_x: int, center_y: int, radius: int, fill_color: typing.Optional[str] = None, stroke_color: typing.Optional[str] = None, stroke_width: int = 1):
+        center_x, center_y, radius, stroke_width = int(center_x), int(center_y), int(radius), int(stroke_width)
         self.pen.penup()
         # Go to the 'top' of the circle in this coord system for circle drawing
         self.pen.goto(center_x, center_y - radius)
@@ -66,52 +67,75 @@ class TurtleDrawer:
 
         if fill_color:
             self.pen.begin_fill()
-        self.pen.pendown()
-        self.pen.circle(radius)
-        self.pen.penup()
+        
+        # Only draw the outline if a stroke color is provided
+        if stroke_color and stroke_width > 0:
+            self.pen.pendown()
+            self.pen.circle(radius)
+            self.pen.penup()
+
         if fill_color:
             self.pen.end_fill()
+            # If there was no stroke, we still need to draw the filled circle
+            if not (stroke_color and stroke_width > 0):
+                self.pen.goto(center_x, center_y - radius)
+                self.pen.pendown()
+                self.pen.circle(radius)
+                self.pen.penup()
 
 
-    def draw_triangle(self, x1: int, y1: int, x2: int, y2: int, x3: int, y3: int, fill_color: typing.Optional[str], stroke_color: typing.Optional[str], stroke_width: int):
+
+    def draw_triangle(self, x1: int, y1: int, x2: int, y2: int, x3: int, y3: int, fill_color: typing.Optional[str] = None, stroke_color: typing.Optional[str] = None, stroke_width: int = 1):
         self._set_fill_style(fill_color)
-        self._set_pen_style(stroke_color, stroke_width)
+        self._set_pen_style(stroke_color, int(stroke_width))
 
         self.pen.penup()
-        self.pen.goto(x1, y1)
-        self.pen.pendown()
+        self.pen.goto(int(x1), int(y1))
+        
         if fill_color:
             self.pen.begin_fill()
-        self.pen.goto(x2, y2)
-        self.pen.goto(x3, y3)
-        self.pen.goto(x1, y1) # Close the triangle
+        
+        if stroke_color or fill_color:
+            self.pen.pendown()
+            self.pen.goto(int(x2), int(y2))
+            self.pen.goto(int(x3), int(y3))
+            self.pen.goto(int(x1), int(y1)) # Close the triangle
+            self.pen.penup()
+
         if fill_color:
             self.pen.end_fill()
-        self.pen.penup()
 
-    def draw_rectangle(self, x: int, y: int, width: int, height: int, fill_color: typing.Optional[str], stroke_color: typing.Optional[str], stroke_width: int):
+
+    def draw_rectangle(self, x: int, y: int, width: int, height: int, fill_color: typing.Optional[str] = None, stroke_color: typing.Optional[str] = None, stroke_width: int = 1):
         self._set_fill_style(fill_color)
-        self._set_pen_style(stroke_color, stroke_width)
+        self._set_pen_style(stroke_color, int(stroke_width))
+        x, y, width, height = int(x), int(y), int(width), int(height)
 
         self.pen.penup()
         self.pen.goto(x, y)
-        self.pen.pendown()
+
         if fill_color:
             self.pen.begin_fill()
-        self.pen.goto(x + width, y)
-        self.pen.goto(x + width, y + height) # Y increases downwards due to setworldcoordinates
-        self.pen.goto(x, y + height)
-        self.pen.goto(x, y) # Close the rectangle
+
+        if stroke_color or fill_color:
+            self.pen.pendown()
+            self.pen.goto(x + width, y)
+            self.pen.goto(x + width, y + height) # Y increases downwards due to setworldcoordinates
+            self.pen.goto(x, y + height)
+            self.pen.goto(x, y) # Close the rectangle
+            self.pen.penup()
+
         if fill_color:
             self.pen.end_fill()
-        self.pen.penup()
 
-    def draw_star(self, center_x: int, center_y: int, outer_radius: int, inner_radius: int, points: int, fill_color: typing.Optional[str], stroke_color: typing.Optional[str], stroke_width: int):
+
+    def draw_star(self, center_x: int, center_y: int, outer_radius: int, inner_radius: int, points: int, fill_color: typing.Optional[str] = None, stroke_color: typing.Optional[str] = None, stroke_width: int = 1):
         if points < 3:
-            raise ValueError("A star must have at least 3 points.")
+            return
 
+        center_x, center_y, outer_radius, inner_radius, points = int(center_x), int(center_y), int(outer_radius), int(inner_radius), int(points)
         self._set_fill_style(fill_color)
-        self._set_pen_style(stroke_color, stroke_width)
+        self._set_pen_style(stroke_color, int(stroke_width))
 
         self.pen.penup()
 
@@ -124,15 +148,19 @@ class TurtleDrawer:
             star_points.append((x, y))
 
         self.pen.goto(star_points[0])
-        self.pen.pendown()
+        
         if fill_color:
             self.pen.begin_fill()
-        for i in range(1, len(star_points)):
-            self.pen.goto(star_points[i])
-        self.pen.goto(star_points[0]) # Close the shape
+        
+        if stroke_color or fill_color:
+            self.pen.pendown()
+            for i in range(1, len(star_points)):
+                self.pen.goto(star_points[i])
+            self.pen.goto(star_points[0]) # Close the shape
+            self.pen.penup()
+        
         if fill_color:
             self.pen.end_fill()
-        self.pen.penup()
 
     def save(self, filename: str):
         self.screen.update()
