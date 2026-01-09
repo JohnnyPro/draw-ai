@@ -12,6 +12,8 @@ A simplified, non-iterative version of the drawing application that:
 import os
 import re
 import atexit
+import argparse
+import sys
 from datetime import datetime
 from typing import Optional
 
@@ -107,7 +109,7 @@ def _extract_code(response: str) -> str:
     return response
 
 
-def generate_one_go(llm_client: LLMClient, user_prompt: str, backend: str, live_preview_filepath: Optional[str] = None) -> str:
+def generate_one_go(llm_client: LLMClient, user_prompt: str, backend: str, custom_system_prompt: Optional[str] = None, live_preview_filepath: Optional[str] = None) -> str:
     """
     Generates a complete drawing from a prompt in a single LLM call.
     """
@@ -124,7 +126,13 @@ def generate_one_go(llm_client: LLMClient, user_prompt: str, backend: str, live_
     # 2. Craft the "one-go" prompt
     backend_instructions = renderer.system_prompt_instructions
     
-    system_prompt = f"""You are an expert drawing AI that generates a complete drawing in one go.
+    if custom_system_prompt:
+        base_prompt = custom_system_prompt
+        print(f"  [Prompt] Using custom system prompt: '{base_prompt[:100]}...'")
+    else:
+        base_prompt = "You are an expert drawing AI that generates a complete drawing in one go."
+
+    system_prompt = f"""{base_prompt}
 Your task is to generate a set of raw drawing elements based on the user's request.
 {backend_instructions}
 
@@ -189,7 +197,14 @@ Generate the complete set of drawing elements for this entire scene now."""
 
 def main():
     """Main application entry point."""
+    from dotenv import load_dotenv
     load_dotenv()
+    
+    parser = argparse.ArgumentParser(description="Generate images from prompts in one-go.")
+    parser.add_argument("--prompt", type=str, help="The drawing prompt.")
+    parser.add_argument("--system-prompt", type=str, help="An optional custom system prompt for the LLM.")
+    args = parser.parse_args()
+
     if not os.getenv("GOOGLE_API_KEY"):
         print("Error: GOOGLE_API_KEY not found. Please set it in your .env file.")
         return
@@ -202,7 +217,8 @@ def main():
 
     # --- Live Viewer Setup ---
     live_preview_filepath = None
-    if DRAWING_BACKEND in ["svg", "pillow"]:
+    # Only start live viewer in interactive mode
+    if not args.prompt and DRAWING_BACKEND in ["svg", "pillow"]:
         ext_map = {"svg": "svg", "pillow": "png"}
         ext = ext_map[DRAWING_BACKEND]
         LIVE_FILENAME = f"live_drawing.{ext}"
@@ -216,13 +232,28 @@ def main():
         
         live_preview_filepath = os.path.join(OUTPUT_DIRECTORY, LIVE_FILENAME)
 
+    # If a prompt is provided via arguments, run once and exit
+    if args.prompt:
+        try:
+            filepath = generate_one_go(llm_client, args.prompt, DRAWING_BACKEND, args.system_prompt)
+            print("\n" + "=" * 60)
+            print(f"✅ Drawing saved to: {filepath}")
+            print("=" * 60)
+        except Exception as e:
+            print(f"\nAn error occurred: {e}")
+            if DEBUG_MODE:
+                import traceback
+                traceback.print_exc()
+        return
+
+    # Otherwise, enter interactive mode
     while True:
         try:
             prompt = input("\nWhat would you like me to draw in one go? (or Ctrl+C to exit)\n> ")
             if not prompt.strip():
                 continue
 
-            filepath = generate_one_go(llm_client, prompt, DRAWING_BACKEND, live_preview_filepath)
+            filepath = generate_one_go(llm_client, prompt, DRAWING_BACKEND, live_preview_filepath=live_preview_filepath)
 
             print("\n" + "=" * 60)
             print(f"✅ Drawing saved to: {filepath}")
