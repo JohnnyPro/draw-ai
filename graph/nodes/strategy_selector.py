@@ -79,7 +79,7 @@ def select_strategy(state: DrawState) -> DrawState:
     try:
         client = genai.Client()
         response = client.models.generate_content(
-            model="models/gemini-latest",
+            model="models/gemini-flash-latest",
             contents=_get_strategy_prompt(prompt),
         )
         

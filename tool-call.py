@@ -77,7 +77,7 @@ def main():
             
             # The new API for tool use involves a single generate_content call
             response = client.models.generate_content(
-                model="models/gemini-latest",
+                model="models/gemini-flash-latest",
                 contents=prompt,
                 generation_config=types.GenerationConfig(tools=PRIMITIVE_TOOLS)
             )

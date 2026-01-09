@@ -107,7 +107,7 @@ def analyze_prompt(state: DrawState) -> DrawState:
     try:
         client = genai.Client()
         response = client.models.generate_content(
-            model="models/gemini-latest",
+            model="models/gemini-flash-latest",
             contents=_get_analysis_prompt(original_prompt),
         )
         

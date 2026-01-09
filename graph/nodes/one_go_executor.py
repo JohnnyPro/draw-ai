@@ -102,7 +102,7 @@ Generate the complete set of drawing elements for this entire scene now."""
         # Call LLM
         client = genai.Client()
         response = client.models.generate_content(
-            model="models/gemini-latest",
+            model="models/gemini-flash-latest",
             contents=f"{system_prompt}\n\n{prompt_for_llm}",
         )
         

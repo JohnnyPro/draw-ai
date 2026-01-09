@@ -175,7 +175,7 @@ class LLMClient:
 
         try:
             response = self.client.models.generate_content(
-                model="models/gemini-latest",
+                model="models/gemini-flash-latest",
                 contents=full_prompt
             )
             self.last_call_timestamp = time.time()

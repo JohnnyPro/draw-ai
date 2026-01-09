@@ -84,7 +84,7 @@ def execute_tool_call(state: DrawState) -> DrawState:
         # Call LLM with tools
         client = genai.Client()
         response = client.models.generate_content(
-            model="models/gemini-latest",
+            model="models/gemini-flash-latest",
             contents=prompt,
             config=types.GenerateContentConfig(tools=primitive_tools)
         )
