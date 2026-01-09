@@ -20,7 +20,7 @@ from enum import Enum
 import atexit
 
 from dotenv import load_dotenv
-import google.generativeai as genai
+from google import genai
 
 from base_draw import BaseDraw, DrawingConfig
 from svg import SVGDraw
@@ -152,13 +152,10 @@ class DrawingState:
 class LLMClient:
     """Abstraction layer for LLM calls with rate limiting."""
 
-    def __init__(self, api_key: str, min_interval: float = MIN_LLM_CALL_INTERVAL_SECONDS):
+    def __init__(self, min_interval: float = MIN_LLM_CALL_INTERVAL_SECONDS):
         self.min_interval = min_interval
         self.last_call_timestamp: Optional[float] = None
-
-        # Configure Gemini
-        genai.configure(api_key=api_key)
-        self.model = genai.GenerativeModel("gemini-2.5-flash")
+        self.client = genai.Client()
 
     def _enforce_rate_limit(self) -> None:
         """Sleep if needed to respect rate limits."""
@@ -177,7 +174,10 @@ class LLMClient:
         full_prompt = f"{system_prompt}\n\n{user_prompt}"
 
         try:
-            response = self.model.generate_content(full_prompt)
+            response = self.client.models.generate_content(
+                model="models/gemini-latest",
+                contents=full_prompt
+            )
             self.last_call_timestamp = time.time()
             return response.text
         except Exception as e:
@@ -560,9 +560,8 @@ def main():
     # Load environment variables
     load_dotenv()
 
-    api_key = os.getenv("GEMINI_API_KEY")
-    if not api_key:
-        print("Error: GEMINI_API_KEY not found in environment variables.")
+    if not os.getenv("GOOGLE_API_KEY"):
+        print("Error: GOOGLE_API_KEY not found in environment variables.")
         print("Please set it in your .env file.")
         return
 
@@ -572,7 +571,7 @@ def main():
     print()
 
     # Initialize LLM client
-    llm_client = LLMClient(api_key)
+    llm_client = LLMClient()
     
     # --- Live Viewer Setup ---
     live_preview_filepath = None

@@ -1,19 +1,18 @@
 import inspect
 import sys
 import os
-import importlib
 import argparse
 import typing
 from pathlib import Path
 
-import google.generativeai as genai
-from google.generativeai.types import Tool
-from google.generativeai.types import FunctionDeclaration
+from google import genai
+from google.genai import types
 
 # Import implementations
 from primitives.pillow_impl import PillowDrawer
 from primitives.svg_impl import SVGDrawer
 from primitives.turtle_impl import TurtleDrawer
+from primitives import definitions
 
 from dotenv import load_dotenv
 from datetime import datetime
@@ -25,57 +24,14 @@ OUTPUT_DIRECTORY = "./outputs"
 
 # --- Step 1 & 2: Read definitions and generate tools ---
 def _load_primitive_definitions():
-    import primitives.definitions as definitions_module
-
-    for name, func in inspect.getmembers(definitions_module, inspect.isfunction):
+    """
+    Loads the drawable functions from the definitions module.
+    The new SDK can often use the function objects directly.
+    """
+    global PRIMITIVE_TOOLS
+    for name, func in inspect.getmembers(definitions, inspect.isfunction):
         if name.startswith("draw_"):
-            signature = inspect.signature(func)
-            parameters_properties = {}
-            parameters_required = []
-
-            for param_name, param in signature.parameters.items():
-                param_json_type = None
-                is_optional = False
-
-                # Correctly identify Optional types
-                if hasattr(param.annotation, '__origin__') and param.annotation.__origin__ is typing.Union:
-                    args = typing.get_args(param.annotation)
-                    if type(None) in args:
-                        is_optional = True
-                        # Get the non-None type
-                        non_none_args = [a for a in args if a is not type(None)]
-                        if non_none_args:
-                            param_type = non_none_args[0]
-                        else:
-                            continue # Should not happen in our case
-                    else:
-                        param_type = param.annotation
-                else:
-                    param_type = param.annotation
-
-                if param_type is str:
-                    param_json_type = "string"
-                elif param_type is int:
-                    param_json_type = "integer"
-
-
-                if param_json_type:
-                    parameters_properties[param_name] = {"type": param_json_type}
-                    if not is_optional:
-                        parameters_required.append(param_name)
-
-            description = inspect.getdoc(func) or f"Draws a {name.replace('draw_', '')}."
-
-            tool_spec = {
-                "name": name,
-                "description": description,
-                "parameters": {
-                    "type": "object",
-                    "properties": parameters_properties,
-                    "required": parameters_required,
-                },
-            }
-            PRIMITIVE_TOOLS.append(Tool(function_declarations=[FunctionDeclaration(**tool_spec)]))
+            PRIMITIVE_TOOLS.append(func)
 
 
 def _execute_drawing_function(drawer_instance, function_name, **kwargs):
@@ -96,21 +52,17 @@ def main():
     # Load environment variables from .env file
     load_dotenv()
 
-    # Configure API key
-    try:
-        api_key = os.getenv("GEMINI_API_KEY")
-        if not api_key:
-            raise ValueError("GEMINI_API_KEY not found. Please set it in your .env file or environment variables.")
-        genai.configure(api_key=api_key)
-    except Exception as e:
-        print(f"Error configuring Gemini API: {e}")
+    # The new SDK automatically picks up the GOOGLE_API_KEY
+    if not os.getenv("GOOGLE_API_KEY"):
+        print("Error: GOOGLE_API_KEY not found. Please set it in your .env file or environment variables.")
         sys.exit(1)
+    
+    client = genai.Client()
 
     # Create output directory if it doesn't exist
     os.makedirs(OUTPUT_DIRECTORY, exist_ok=True)
     _load_primitive_definitions()
 
-    model = genai.GenerativeModel('gemini-2.5-flash', tools=PRIMITIVE_TOOLS)
     print("=" * 60)
     print(f"🖼️  Function-Calling Drawing Application ({args.drawer_type.upper()} backend)")
     print("=" * 60)
@@ -122,8 +74,13 @@ def main():
                 continue
 
             print(f"Sending prompt to LLM: '{prompt}'")
-            chat = model.start_chat(enable_automatic_function_calling=False)
-            response = chat.send_message(prompt)
+            
+            # The new API for tool use involves a single generate_content call
+            response = client.models.generate_content(
+                model="models/gemini-latest",
+                contents=prompt,
+                generation_config=types.GenerationConfig(tools=PRIMITIVE_TOOLS)
+            )
 
             # Instantiate the drawer
             drawer = None
@@ -137,7 +94,7 @@ def main():
                 print("Invalid drawer type selected.")
                 continue
 
-            # Process function calls from the LLM
+            # Process function calls from the LLM response
             if response.candidates and response.candidates[0].content.parts:
                 print("LLM is generating the drawing...")
                 has_calls = False
@@ -145,8 +102,10 @@ def main():
                     if part.function_call:
                         has_calls = True
                         function_call = part.function_call
-                        print(f"  - Executing: {function_call.name}")
-                        _execute_drawing_function(drawer, function_call.name, **function_call.args)
+                        # Convert arguments to a standard dict
+                        args_dict = {key: value for key, value in function_call.args.items()}
+                        print(f"  - Executing: {function_call.name}({args_dict})")
+                        _execute_drawing_function(drawer, function_call.name, **args_dict)
                     elif part.text:
                         print(f"LLM said: {part.text}")
                 
@@ -156,7 +115,6 @@ def main():
             else:
                 print("The LLM did not provide a valid response.")
                 continue
-
 
             # --- Save output ---
             if drawer:
@@ -184,7 +142,6 @@ def main():
                         Image.open(filepath).show()
                     except Exception:
                         print(f"(Could not automatically open {filepath})")
-
 
         except KeyboardInterrupt:
             print("\n\nGoodbye! 👋")
